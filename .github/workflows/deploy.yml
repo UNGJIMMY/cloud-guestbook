@@ -1,0 +1,47 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH Remote Commands
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ec2-user
+          key: ${{ secrets.EC2_KEY }}
+          port: 22
+          script: |
+            # 1. 도커 권한 문제 방지 (혹시 몰라서 처리)
+            sudo chmod 666 /var/run/docker.sock
+            
+            # 2. 프로젝트 폴더가 없으면 다운로드(clone), 있으면 업데이트(pull)
+            if [ ! -d "cloud-guestbook" ]; then
+              git clone https://github.com/${{ github.repository }}.git
+            fi
+            
+            cd cloud-guestbook
+            git pull origin main
+            
+            # 3. 기존에 돌고 있던 컨테이너가 있으면 삭제 (업데이트를 위해)
+            docker stop guestbook-app || true
+            docker rm guestbook-app || true
+            
+            # 4. 도커 이미지 빌드 (새 코드 반영)
+            docker build -t guestbook-image .
+            
+            # 5. 새 컨테이너 실행 (환경변수 주입)
+            # -d: 백그라운드 실행
+            # -p 8000:8000: 8000번 포트 열기
+            # -e: DB 접속 정보 주입
+            docker run -d \
+              --name guestbook-app \
+              -p 8000:8000 \
+              -e DB_HOST=${{ secrets.DB_HOST }} \
+              -e DB_USER=admin \
+              -e DB_PASSWORD=gdb \
+              guestbook-image
